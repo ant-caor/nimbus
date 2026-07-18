@@ -113,9 +113,10 @@ jobs:
         working-directory: ${{ matrix.module }}
         env:
           # Pin the patched toolchain so the stdlib scan reflects fixes already
-          # released (e.g. GO-2026-5039 in net/textproto, fixed in go1.25.11).
+          # released (e.g. GO-2026-5856, an Encrypted Client Hello privacy leak in
+          # crypto/tls reachable via gcppubsub, fixed in go1.25.12).
           # Fetched from go.dev directly, independent of the setup-go manifest.
-          GOTOOLCHAIN: go1.25.11
+          GOTOOLCHAIN: go1.25.12
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
