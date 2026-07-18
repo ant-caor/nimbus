@@ -34,7 +34,7 @@ type shard[V any] struct {
 	head, tail *node[V] // head = most-recently-used, tail = least
 	capacity   int
 	clock      clock.Clock
-	evictions  *uint64
+	evictions  *atomic.Uint64
 }
 
 func (s *shard[V]) get(key string) (store.Entry[V], bool) {
@@ -90,7 +90,7 @@ func (s *shard[V]) insertLocked(key string, e store.Entry[V]) {
 	s.pushFrontLocked(n)
 	if s.capacity > 0 && len(s.items) > s.capacity && s.tail != nil {
 		s.removeLocked(s.tail)
-		atomic.AddUint64(s.evictions, 1)
+		s.evictions.Add(1)
 	}
 }
 
@@ -153,7 +153,7 @@ type Cache[V any] struct {
 	shards    []*shard[V]
 	mask      uint64
 	seed      maphash.Seed
-	evictions uint64
+	evictions atomic.Uint64
 }
 
 // New builds an in-process L1 store.
@@ -218,7 +218,7 @@ func (c *Cache[V]) Delete(_ context.Context, key string) error {
 func (c *Cache[V]) Close() error { return nil }
 
 // Evictions reports the number of LRU evictions since creation.
-func (c *Cache[V]) Evictions() uint64 { return atomic.LoadUint64(&c.evictions) }
+func (c *Cache[V]) Evictions() uint64 { return c.evictions.Load() }
 
 // Len reports the current number of entries across all shards.
 func (c *Cache[V]) Len() int {

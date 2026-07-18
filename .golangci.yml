@@ -6,6 +6,12 @@ linters:
     - misspell
     - unconvert
     - bodyclose
+    # perfsprint guards the zero-alloc culture: it flags fmt.Sprint/Sprintf where
+    # strconv or concatenation is faster and allocation-free (see defaultKeyString).
+    - perfsprint
+    - errorlint # non-%w wrapping and == error comparisons
+    - usestdlibvars # use stdlib named constants instead of magic strings
+    - copyloopvar # flag now-redundant x := x loop copies (Go 1.22+ loopvar)
 
 issues:
   max-issues-per-linter: 0

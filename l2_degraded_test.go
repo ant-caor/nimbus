@@ -46,7 +46,7 @@ var _ store.VersionedStore[string] = unreachableL2[string]{}
 // same against real Redis with a toxiproxy cut; this is the fast, deterministic
 // version that also keeps the branches covered in the core module.
 func TestL2OutageDegradedReadPath(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	down := unreachableL2[string]{err: errors.New("dial tcp 10.0.0.1:6379: connect: connection refused")}
 
 	build := func(l1 store.Store[string], loader Loader[string, string]) Cache[string, string] {

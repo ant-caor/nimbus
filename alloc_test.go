@@ -29,7 +29,7 @@ func TestZeroAllocReadHotPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = c.Close() }()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Prime L1 so every measured call is a fresh hot hit, never a miss/load.
 	if _, err := c.GetOrLoad(ctx, "k"); err != nil {
@@ -66,7 +66,7 @@ func TestZeroAllocReadHotPathsIntKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = c.Close() }()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	const smallKey, largeKey = 7, 1234567
 	for _, k := range []int{smallKey, largeKey} {

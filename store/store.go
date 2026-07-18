@@ -59,6 +59,19 @@ type ConditionalStore[V any] interface {
 	SetIfNewer(ctx context.Context, key string, e Entry[V]) (installed bool, err error)
 }
 
+// Metrics is an optional interface a Store may implement to report operational
+// counters for observability. nimbus's Cache.Stats populates its Evictions and
+// L1Len fields from it when the L1 tier implements it; a store that does not is
+// simply not reported on. It carries no value type because the counters are
+// independent of V.
+type Metrics interface {
+	// Evictions is the cumulative number of entries removed to respect a size or
+	// TTL bound (not counting explicit Deletes).
+	Evictions() uint64
+	// Len is the current number of live entries held by the tier.
+	Len() int
+}
+
 // VersionedStore is the contract for the authoritative, shared L2 tier. It is
 // the single source of versions and the source of truth for values.
 type VersionedStore[V any] interface {

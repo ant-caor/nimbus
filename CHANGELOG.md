@@ -9,6 +9,20 @@ patch releases never do.
 
 ## [Unreleased]
 
+### Added
+
+- `store.Metrics`, an optional interface a `store.Store` may implement to report
+  operational counters (`Evictions() uint64`, `Len() int`). `Cache.Stats`
+  populates its `Evictions` and `L1Len` fields from the L1 tier when it
+  implements this interface (the bundled `store/memory` does), replacing a
+  previously undiscoverable inline interface check.
+
+### Changed
+
+- `Cache.Close` is now idempotent — repeat calls return the same result without
+  redoing the shutdown — and it now reports the refresher's `Close` error
+  instead of silently discarding it.
+
 ## [0.1.0] - 2026-06-21
 
 ### Added

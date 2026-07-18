@@ -82,7 +82,7 @@ var _ store.VersionedStore[string] = (*hookedL2[string])(nil)
 // reproduces that window deterministically. Without the gate (a plain L1 Set)
 // the later, lower-version install would overwrite the newer entry.
 func TestFillVersionGatesL1Install(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	l1 := memory.New[string]()
 
 	const newerVersion = 999

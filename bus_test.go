@@ -38,7 +38,7 @@ func TestCrossInstanceInvalidationViaBus(t *testing.T) {
 	}
 
 	a, b := mk(), mk()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Give both subscriber goroutines a moment to register on the bus.
 	time.Sleep(50 * time.Millisecond)
@@ -79,7 +79,7 @@ func TestBusSkipsOwnOrigin(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = c.Close() }()
-	ctx := context.Background()
+	ctx := t.Context()
 	time.Sleep(50 * time.Millisecond)
 
 	_, _ = c.GetOrLoad(ctx, "k")

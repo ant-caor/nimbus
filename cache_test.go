@@ -67,7 +67,7 @@ func TestGetOrLoadCachesValue(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = c.Close() }()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	v1, err := c.GetOrLoad(ctx, "k")
 	if err != nil || v1 != 1 {
@@ -94,7 +94,7 @@ func TestNegativeCaching(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = c.Close() }()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for i := 0; i < 3; i++ {
 		_, err := c.GetOrLoad(ctx, "missing")
@@ -119,7 +119,7 @@ func TestFreshnessExpiryWithClock(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = c.Close() }()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if v, _ := c.GetOrLoad(ctx, "k"); v != 1 {
 		t.Fatalf("first load got %d, want 1", v)
@@ -144,7 +144,7 @@ func TestInvalidateTagEvicts(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = c.Close() }()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := c.Set(ctx, "a", 100, WithTags("grp")); err != nil {
 		t.Fatal(err)
@@ -206,7 +206,7 @@ func TestRefreshCountedOncePerStaleWave(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { close(release); _ = c.Close() })
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if _, err := c.GetOrLoad(ctx, "k"); err != nil {
 		t.Fatal(err)

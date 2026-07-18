@@ -111,10 +111,12 @@ type cache[K comparable, V any] struct {
 	tagMu sync.Mutex
 	tags  map[string]map[string]struct{} // local, non-authoritative tag index
 
-	closed atomic.Bool
+	closed    atomic.Bool
+	closeOnce sync.Once
+	closeErr  error
 
 	stats struct {
-		hits, staleHits, misses, loads, loadErrors, negHits, refreshes, busEvicts, l2Errors uint64
+		hits, staleHits, misses, loads, loadErrors, negHits, refreshes, busEvicts, l2Errors atomic.Uint64
 	}
 }
 
@@ -122,6 +124,9 @@ type cache[K comparable, V any] struct {
 // entry is always safe (the next read repopulates from L2), so eviction is
 // unconditional; the version on the event is a hint, not a correctness gate.
 func (c *cache[K, V]) onEvent(ev invalidation.Event) {
+	if c.closed.Load() {
+		return // shutting down; stop applying broadcasts (bus events are best-effort)
+	}
 	if ev.OriginID == c.originID {
 		return // our own broadcast; we already evicted locally
 	}
@@ -130,7 +135,7 @@ func (c *cache[K, V]) onEvent(ev invalidation.Event) {
 	}
 	for _, ks := range ev.Keys {
 		_ = c.l1.Delete(context.Background(), ks)
-		atomic.AddUint64(&c.stats.busEvicts, 1)
+		c.stats.busEvicts.Add(1)
 	}
 }
 
@@ -161,9 +166,9 @@ func (c *cache[K, V]) GetOrLoad(ctx context.Context, key K) (V, error) {
 	now := c.clk.Now()
 	e, ok, _ := c.l1.Get(ctx, ks)
 	if ok && e.Fresh(now) {
-		atomic.AddUint64(&c.stats.hits, 1)
+		c.stats.hits.Add(1)
 		if e.Negative {
-			atomic.AddUint64(&c.stats.negHits, 1)
+			c.stats.negHits.Add(1)
 			return zero, ErrNotFound
 		}
 		return e.Value, nil
@@ -171,11 +176,11 @@ func (c *cache[K, V]) GetOrLoad(ctx context.Context, key K) (V, error) {
 	if ok && !e.Negative && e.Stale(now) {
 		// Stale-while-revalidate: serve the stale value immediately and refresh
 		// out of band so the request does not pay the loader latency.
-		atomic.AddUint64(&c.stats.staleHits, 1)
+		c.stats.staleHits.Add(1)
 		c.scheduleRefresh(key, ks)
 		return e.Value, nil
 	}
-	atomic.AddUint64(&c.stats.misses, 1)
+	c.stats.misses.Add(1)
 	// Stampede protection: concurrent misses for ks collapse into one load.
 	v, _, err := c.sf.Do(ks, func() (V, error) {
 		return c.fill(ctx, key, ks)
@@ -191,7 +196,7 @@ func (c *cache[K, V]) fill(ctx context.Context, key K, ks string) (V, error) {
 	var zero V
 
 	if c.l2 == nil {
-		atomic.AddUint64(&c.stats.loads, 1)
+		c.stats.loads.Add(1)
 		val, err := c.loader(ctx, key)
 		now := c.clk.Now()
 		if errors.Is(err, ErrNotFound) {
@@ -199,7 +204,7 @@ func (c *cache[K, V]) fill(ctx context.Context, key K, ks string) (V, error) {
 			return zero, ErrNotFound
 		}
 		if err != nil {
-			atomic.AddUint64(&c.stats.loadErrors, 1)
+			c.stats.loadErrors.Add(1)
 			return zero, err
 		}
 		_ = c.l1.Set(ctx, ks, c.valueEntry(val, now))
@@ -216,7 +221,7 @@ func (c *cache[K, V]) fill(ctx context.Context, key K, ks string) (V, error) {
 	}
 	expect := cur.Version // current authoritative version (0 if absent/tombstone)
 
-	atomic.AddUint64(&c.stats.loads, 1)
+	c.stats.loads.Add(1)
 	val, err := c.loader(ctx, key)
 	now = c.clk.Now()
 	if errors.Is(err, ErrNotFound) {
@@ -231,7 +236,7 @@ func (c *cache[K, V]) fill(ctx context.Context, key K, ks string) (V, error) {
 			// Degraded mode: L2 is unreachable. The loader reported not-found
 			// (origin-authoritative), so return ErrNotFound without caching a
 			// negative we could not version. See the L2-outage contract in DESIGN.md.
-			atomic.AddUint64(&c.stats.l2Errors, 1)
+			c.stats.l2Errors.Add(1)
 			return zero, ErrNotFound
 		}
 		if !deleted {
@@ -241,7 +246,7 @@ func (c *cache[K, V]) fill(ctx context.Context, key K, ks string) (V, error) {
 				return e2.Value, nil
 			}
 			if lerr != nil {
-				atomic.AddUint64(&c.stats.l2Errors, 1)
+				c.stats.l2Errors.Add(1)
 			}
 			return zero, ErrNotFound
 		}
@@ -249,7 +254,7 @@ func (c *cache[K, V]) fill(ctx context.Context, key K, ks string) (V, error) {
 		return zero, ErrNotFound
 	}
 	if err != nil {
-		atomic.AddUint64(&c.stats.loadErrors, 1)
+		c.stats.loadErrors.Add(1)
 		return zero, err
 	}
 	freshUntil, staleUntil := c.window(now)
@@ -266,7 +271,7 @@ func (c *cache[K, V]) fill(ctx context.Context, key K, ks string) (V, error) {
 			// L2 went unreachable on the recheck. Degrade to the loaded value
 			// (origin-authoritative, uncached) rather than reporting a false
 			// not-found for a key the winner may hold.
-			atomic.AddUint64(&c.stats.l2Errors, 1)
+			c.stats.l2Errors.Add(1)
 			return val, nil
 		}
 		return zero, ErrNotFound
@@ -275,7 +280,7 @@ func (c *cache[K, V]) fill(ctx context.Context, key K, ks string) (V, error) {
 		// Degraded mode: L2 is unreachable on write-back. The loader produced val
 		// (origin-authoritative), so return it without caching rather than failing a
 		// request the origin already served. See the L2-outage contract in DESIGN.md.
-		atomic.AddUint64(&c.stats.l2Errors, 1)
+		c.stats.l2Errors.Add(1)
 		return val, nil
 	}
 	c.installL1(ctx, ks, stored)
@@ -292,7 +297,7 @@ func (c *cache[K, V]) scheduleRefresh(key K, ks string) {
 		return nil
 	})
 	if launched { // count real refreshes, not suppressed duplicates
-		atomic.AddUint64(&c.stats.refreshes, 1)
+		c.stats.refreshes.Add(1)
 	}
 }
 
@@ -412,38 +417,40 @@ func (c *cache[K, V]) InvalidateTag(ctx context.Context, tag string) error {
 
 func (c *cache[K, V]) Stats() Stats {
 	s := Stats{
-		Hits:         atomic.LoadUint64(&c.stats.hits),
-		StaleHits:    atomic.LoadUint64(&c.stats.staleHits),
-		Misses:       atomic.LoadUint64(&c.stats.misses),
-		Loads:        atomic.LoadUint64(&c.stats.loads),
-		LoadErrors:   atomic.LoadUint64(&c.stats.loadErrors),
-		NegativeHits: atomic.LoadUint64(&c.stats.negHits),
-		Refreshes:    atomic.LoadUint64(&c.stats.refreshes),
-		BusEvicts:    atomic.LoadUint64(&c.stats.busEvicts),
-		L2Errors:     atomic.LoadUint64(&c.stats.l2Errors),
+		Hits:         c.stats.hits.Load(),
+		StaleHits:    c.stats.staleHits.Load(),
+		Misses:       c.stats.misses.Load(),
+		Loads:        c.stats.loads.Load(),
+		LoadErrors:   c.stats.loadErrors.Load(),
+		NegativeHits: c.stats.negHits.Load(),
+		Refreshes:    c.stats.refreshes.Load(),
+		BusEvicts:    c.stats.busEvicts.Load(),
+		L2Errors:     c.stats.l2Errors.Load(),
 	}
-	if st, ok := c.l1.(interface {
-		Evictions() uint64
-		Len() int
-	}); ok {
+	if st, ok := c.l1.(store.Metrics); ok {
 		s.Evictions = st.Evictions()
 		s.L1Len = st.Len()
 	}
 	return s
 }
 
+// Close shuts the cache down: it stops the bus subscriber and waits for it,
+// then closes the refresher. It is idempotent — repeat calls return the same
+// result without redoing the work — and reports the refresher's Close error.
+// It deliberately does not close c.l1/c.l2 or the bus: the caller owns any
+// store, client, or bus it passed in.
 func (c *cache[K, V]) Close() error {
-	c.closed.Store(true)
-	if c.busCancel != nil {
-		c.busCancel() // stop the subscriber goroutine
-	}
-	c.busWG.Wait()
-	if c.refresher != nil {
-		_ = c.refresher.Close()
-	}
-	// We deliberately do not close c.l1/c.l2 or the bus: the caller owns any
-	// store, client, or bus it passed in.
-	return nil
+	c.closeOnce.Do(func() {
+		c.closed.Store(true)
+		if c.busCancel != nil {
+			c.busCancel() // stop the subscriber goroutine
+		}
+		c.busWG.Wait()
+		if c.refresher != nil {
+			c.closeErr = c.refresher.Close()
+		}
+	})
+	return c.closeErr
 }
 
 func (c *cache[K, V]) publish(ctx context.Context, ev invalidation.Event) {

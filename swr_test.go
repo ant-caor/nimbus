@@ -38,7 +38,7 @@ func TestStaleWhileRevalidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = c.Close() }()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if v, _ := c.GetOrLoad(ctx, "k"); v != 1 {
 		t.Fatalf("first load got %d, want 1", v)
@@ -80,7 +80,7 @@ func TestMaxTTLCapsLifetime(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = c.Close() }()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if v, _ := c.GetOrLoad(ctx, "k"); v != 1 {
 		t.Fatalf("first load got %d, want 1", v)
@@ -96,7 +96,7 @@ func TestApplyJitterBounds(t *testing.T) {
 	base := time.Minute
 	lo := time.Duration(float64(base) * 0.5)
 	hi := time.Duration(float64(base) * 1.5)
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		got := applyJitter(base, 0.5)
 		if got < lo || got > hi {
 			t.Fatalf("jitter %v out of bounds [%v, %v]", got, lo, hi)
@@ -120,7 +120,7 @@ func TestBackgroundRefreshMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = c.Close() }()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, _ = c.GetOrLoad(ctx, "k")
 	mc.Advance(2 * time.Minute)

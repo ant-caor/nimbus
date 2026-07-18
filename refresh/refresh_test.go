@@ -19,7 +19,7 @@ func TestRequestBoundDedups(t *testing.T) {
 
 	var runs atomic.Int64
 	release := make(chan struct{})
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		r.Schedule("k", func(_ context.Context) error {
 			runs.Add(1)
 			<-release // hold the slot so duplicates are suppressed
